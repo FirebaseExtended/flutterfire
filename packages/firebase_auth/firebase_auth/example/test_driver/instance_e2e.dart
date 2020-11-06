@@ -193,8 +193,9 @@ void runInstanceTests() {
         try {
           await auth.applyActionCode('!!!!!!');
           fail("Should have thrown");
-        } on FirebaseException catch (e) {
+        } on FirebaseAuthException catch (e) {
           expect(e.code, equals("invalid-action-code"));
+          expect(e.status, AuthExceptionStatusCode.invalidActionCode);
         } catch (e) {
           fail(e.toString());
         }
@@ -206,8 +207,9 @@ void runInstanceTests() {
         try {
           await auth.checkActionCode('!!!!!!');
           fail('Should have thrown');
-        } on FirebaseException catch (e) {
+        } on FirebaseAuthException catch (e) {
           expect(e.code, equals("invalid-action-code"));
+          expect(e.status, AuthExceptionStatusCode.invalidActionCode);
         } catch (e) {
           fail(e.toString());
         }
@@ -220,8 +222,9 @@ void runInstanceTests() {
           await auth.confirmPasswordReset(
               code: '!!!!!!', newPassword: 'thingamajig');
           fail('Should have thrown');
-        } on FirebaseException catch (e) {
+        } on FirebaseAuthException catch (e) {
           expect(e.code, equals("invalid-action-code"));
+          expect(e.status, AuthExceptionStatusCode.invalidActionCode);
         } catch (e) {
           fail((e.toString()));
         }
@@ -263,6 +266,7 @@ void runInstanceTests() {
           fail("Should have thrown FirebaseAuthException");
         } on FirebaseAuthException catch (e) {
           expect(e.code, equals('email-already-in-use'));
+          expect(e.status, AuthExceptionStatusCode.emailAlreadyInUse);
         } catch (e) {
           fail(e.toString());
         }
@@ -276,6 +280,7 @@ void runInstanceTests() {
           fail("Should have thrown FirebaseAuthException");
         } on FirebaseAuthException catch (e) {
           expect(e.code, equals('invalid-email'));
+          expect(e.status, AuthExceptionStatusCode.invalidEmail);
         } catch (e) {
           fail(e.toString());
         }
@@ -289,6 +294,7 @@ void runInstanceTests() {
           fail("Should have thrown FirebaseAuthException");
         } on FirebaseAuthException catch (e) {
           expect(e.code, equals('weak-password'));
+          expect(e.status, AuthExceptionStatusCode.weakPassword);          
         } catch (e) {
           fail(e.toString());
         }
@@ -315,7 +321,8 @@ void runInstanceTests() {
           await auth.fetchSignInMethodsForEmail('foobar');
           fail('Should have thrown');
         } on FirebaseAuthException catch (e) {
-          expect(e.code, equals("invalid-email"));
+          expect(e.code, equals('invalid-email'));
+          expect(e.status, AuthExceptionStatusCode.invalidEmail);
         } catch (e) {
           fail(e.toString());
         }
@@ -376,6 +383,7 @@ void runInstanceTests() {
           fail('Should have thrown');
         } on FirebaseAuthException catch (e) {
           expect(e.code, equals('user-not-found'));
+          expect(e.status, AuthExceptionStatusCode.userNotFound);
         } catch (e) {
           fail(e.toString());
         }
@@ -720,7 +728,7 @@ void runInstanceTests() {
         Exception e = await getError();
         expect(e, isA<FirebaseAuthException>());
         FirebaseAuthException exception = e as FirebaseAuthException;
-        expect(exception.code, equals('invalid-phone-number'));
+        expect(exception.status, AuthExceptionStatusCode.invalidPhoneNumber);
       });
 
       test('should auto verify phone number', () async {
