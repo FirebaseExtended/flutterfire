@@ -9,14 +9,19 @@ void testsMain() {
     RemoteConfig remoteConfig;
 
     setUp(() async {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+          options: const FirebaseOptions(
+        apiKey: 'AIzaSyAHAsf51D0A407EklG1bs-5wA7EbyfNFg0',
+        appId: '1:448618578101:ios:2bc5c1fe2ec336f8ac3efc',
+        messagingSenderId: '448618578101',
+        projectId: 'react-native-firebase-testing',
+      ));
       remoteConfig = RemoteConfig.instance;
       await remoteConfig.setConfigSettings(RemoteConfigSettings(
         fetchTimeout: const Duration(seconds: 8),
         minimumFetchInterval: Duration.zero,
       ));
       await remoteConfig.setDefaults(<String, dynamic>{
-        'welcome': 'default welcome',
         'hello': 'default hello',
       });
       await remoteConfig.ensureInitialized();
@@ -28,8 +33,8 @@ void testsMain() {
       await remoteConfig.fetchAndActivate();
       expect(remoteConfig.lastFetchStatus, RemoteConfigFetchStatus.success);
       expect(remoteConfig.lastFetchTime.isAfter(mark), true);
-      expect(remoteConfig.getString('welcome'), 'Earth, welcome! Hello!');
-      expect(remoteConfig.getValue('welcome').source, ValueSource.valueRemote);
+      expect(remoteConfig.getString('string'), 'invertase');
+      expect(remoteConfig.getValue('string').source, ValueSource.valueRemote);
 
       expect(remoteConfig.getString('hello'), 'default hello');
       expect(remoteConfig.getValue('hello').source, ValueSource.valueDefault);
