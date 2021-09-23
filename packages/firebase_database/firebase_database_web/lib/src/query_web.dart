@@ -29,13 +29,21 @@ class QueryWeb extends QueryPlatform {
   @override
   Future<DataSnapshotPlatform> get() async {
     final snapshot = await _firebaseQuery.get();
-    return fromWebSnapshotToPlatformSnapShot(snapshot);
+    return fromWebSnapshotToPlatformSnapShot(
+      database,
+      snapshot,
+      pathComponents,
+    );
   }
 
   @override
   Future<DataSnapshotPlatform> once() async {
+    final snapshot = (await _firebaseQuery.once("value")).snapshot;
+
     return fromWebSnapshotToPlatformSnapShot(
-      (await _firebaseQuery.once("value")).snapshot,
+      database,
+      snapshot,
+      pathComponents,
     );
   }
 
@@ -91,6 +99,7 @@ class QueryWeb extends QueryPlatform {
 
   @override
   Stream<EventPlatform> observe(EventType eventType) {
+    print('observe');
     switch (eventType) {
       case EventType.childAdded:
         return _webStreamToPlatformStream(_firebaseQuery.onChildAdded);
@@ -108,9 +117,15 @@ class QueryWeb extends QueryPlatform {
   }
 
   Stream<EventPlatform> _webStreamToPlatformStream(
-      Stream<database_interop.QueryEvent> stream) {
-    return stream.map((database_interop.QueryEvent event) =>
-        fromWebEventToPlatformEvent(event));
+    Stream<database_interop.QueryEvent> stream,
+  ) {
+    return stream.map(
+      (database_interop.QueryEvent event) => fromWebEventToPlatformEvent(
+        database,
+        event,
+        pathComponents,
+      ),
+    );
   }
 
   QueryPlatform _withQuery(newQuery) {
