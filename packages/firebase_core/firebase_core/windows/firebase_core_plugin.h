@@ -21,6 +21,8 @@ class FirebaseCorePlugin : public flutter::Plugin,
                            public FirebaseAppHostApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows *registrar);
+  static void *GetFirebaseApp(std::string appName);
+  static void *GetFirebaseRemoteConfig(std::string appName);
 
   FirebaseCorePlugin();
 

@@ -14,3 +14,11 @@ void FirebaseCorePluginCApiRegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
 }
+
+FLUTTER_PLUGIN_EXPORT void* GetFirebaseApp(std::string appName) {
+  return firebase_core_windows::FirebaseCorePlugin::GetFirebaseApp(appName);
+}
+
+FLUTTER_PLUGIN_EXPORT void* GetFirebaseRemoteConfig(std::string appName) {
+  return firebase_core_windows::FirebaseCorePlugin::GetFirebaseApp(appName);
+}

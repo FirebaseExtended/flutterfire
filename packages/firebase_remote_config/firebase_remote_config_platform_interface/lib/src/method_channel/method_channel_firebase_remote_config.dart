@@ -4,9 +4,12 @@
 
 // ignore_for_file: require_trailing_commas
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_remote_config_platform_interface/src/pigeon/messages.pigeon.dart';
 
 import '../../firebase_remote_config_platform_interface.dart';
 import 'utils/exception.dart';
@@ -22,6 +25,8 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   /// When the user code calls a Remote Config method, the real instance
   /// is initialized via the [delegateFor] method.
   MethodChannelFirebaseRemoteConfig._() : super(appInstance: null);
+
+  final _api = FirebaseRemoteConfigHostApi();
 
   /// Keeps an internal handle ID for the channel.
   static int _methodChannelHandleId = 0;
@@ -43,10 +48,41 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     return MethodChannelFirebaseRemoteConfig._();
   }
 
-  late Map<String, RemoteConfigValue> _activeParameters;
-  late RemoteConfigSettings _settings;
+  late Map<String, PigeonRemoteConfigValue> _activeParameters;
+  late PigeonRemoteConfigSettings _settings;
   late DateTime _lastFetchTime;
-  late RemoteConfigFetchStatus _lastFetchStatus;
+  late PigeonRemoteConfigFetchStatus _lastFetchStatus;
+
+  PigeonFirebaseApp get pigeonDefault {
+    return PigeonFirebaseApp(
+      appName: app.name,
+      tenantId: tenantId,
+    );
+  }
+
+  @override
+  RemoteConfigSettings getSettings() {
+    return RemoteConfigSettings(
+        fetchTimeout: Duration(seconds: _settings.fetchTimeout),
+        minimumFetchInterval:
+            Duration(seconds: _settings.minimumFetchInterval));
+  }
+
+  @override
+  RemoteConfigFetchStatus getFetchStatus() {
+    switch (_lastFetchStatus) {
+      case PigeonRemoteConfigFetchStatus.noFetchYet:
+        return RemoteConfigFetchStatus.noFetchYet;
+      case PigeonRemoteConfigFetchStatus.success:
+        return RemoteConfigFetchStatus.success;
+      case PigeonRemoteConfigFetchStatus.failure:
+        return RemoteConfigFetchStatus.failure;
+      case PigeonRemoteConfigFetchStatus.throttle:
+        return RemoteConfigFetchStatus.throttle;
+      default:
+        return RemoteConfigFetchStatus.noFetchYet;
+    }
+  }
 
   /// Gets a [FirebaseRemoteConfigPlatform] instance for a specific
   /// [FirebaseApp].
@@ -64,34 +100,44 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   FirebaseRemoteConfigPlatform setInitialValues({
     required Map<dynamic, dynamic> remoteConfigValues,
   }) {
-    final fetchTimeout = Duration(seconds: remoteConfigValues['fetchTimeout']);
-    final minimumFetchInterval =
-        Duration(seconds: remoteConfigValues['minimumFetchInterval']);
-    final lastFetchMillis = remoteConfigValues['lastFetchTime'];
-    final lastFetchStatus = remoteConfigValues['lastFetchStatus'];
+    final fetchTimeout = remoteConfigValues.isEmpty
+        ? const Duration(seconds: 60)
+        : Duration(seconds: remoteConfigValues['fetchTimeout']);
+    final minimumFetchInterval = remoteConfigValues.isEmpty
+        ? const Duration(hours: 12)
+        : Duration(seconds: remoteConfigValues['minimumFetchInterval']);
+    final lastFetchMillis =
+        remoteConfigValues.isEmpty ? 0 : remoteConfigValues['lastFetchTime'];
+    final lastFetchStatus = remoteConfigValues.isEmpty
+        ? 'noFetchYet'
+        : remoteConfigValues['lastFetchStatus'];
 
-    _settings = RemoteConfigSettings(
-      fetchTimeout: fetchTimeout,
-      minimumFetchInterval: minimumFetchInterval,
+    _settings = PigeonRemoteConfigSettings(
+      fetchTimeout: fetchTimeout.inSeconds,
+      minimumFetchInterval: minimumFetchInterval.inSeconds,
     );
     _lastFetchTime = DateTime.fromMillisecondsSinceEpoch(lastFetchMillis);
     _lastFetchStatus = _parseFetchStatus(lastFetchStatus);
-    _activeParameters = _parseParameters(remoteConfigValues['parameters']);
+    if (remoteConfigValues.isNotEmpty) {
+      _activeParameters =
+          _parsePigeonParameters(remoteConfigValues['parameters']);
+    }
+
     return this;
   }
 
-  RemoteConfigFetchStatus _parseFetchStatus(String? status) {
+  PigeonRemoteConfigFetchStatus _parseFetchStatus(String? status) {
     switch (status) {
       case 'noFetchYet':
-        return RemoteConfigFetchStatus.noFetchYet;
+        return PigeonRemoteConfigFetchStatus.noFetchYet;
       case 'success':
-        return RemoteConfigFetchStatus.success;
+        return PigeonRemoteConfigFetchStatus.success;
       case 'failure':
-        return RemoteConfigFetchStatus.failure;
+        return PigeonRemoteConfigFetchStatus.failure;
       case 'throttle':
-        return RemoteConfigFetchStatus.throttle;
+        return PigeonRemoteConfigFetchStatus.throttle;
       default:
-        return RemoteConfigFetchStatus.noFetchYet;
+        return PigeonRemoteConfigFetchStatus.noFetchYet;
     }
   }
 
@@ -99,18 +145,15 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   DateTime get lastFetchTime => _lastFetchTime;
 
   @override
-  RemoteConfigFetchStatus get lastFetchStatus => _lastFetchStatus;
+  PigeonRemoteConfigFetchStatus get lastFetchStatus => _lastFetchStatus;
 
   @override
-  RemoteConfigSettings get settings => _settings;
+  PigeonRemoteConfigSettings get settings => _settings;
 
   @override
   Future<void> ensureInitialized() async {
     try {
-      await channel.invokeMethod<void>(
-          'RemoteConfig#ensureInitialized', <String, dynamic>{
-        'appName': app.name,
-      });
+      await _api.ensureInitialized(pigeonDefault);
     } catch (exception, stackTrace) {
       convertPlatformException(exception, stackTrace);
     }
@@ -119,12 +162,9 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   @override
   Future<bool> activate() async {
     try {
-      bool? configChanged = await channel
-          .invokeMethod<bool>('RemoteConfig#activate', <String, dynamic>{
-        'appName': app.name,
-      });
+      bool configChanged = await _api.activate(pigeonDefault);
       await _updateConfigParameters();
-      return configChanged!;
+      return configChanged;
     } catch (exception, stackTrace) {
       convertPlatformException(exception, stackTrace);
     }
@@ -133,13 +173,11 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   @override
   Future<void> fetch() async {
     try {
-      await channel.invokeMethod<void>('RemoteConfig#fetch', <String, dynamic>{
-        'appName': app.name,
-      });
-      await _updateConfigProperties();
+      await _api.fetch(pigeonDefault);
+      // await _updateConfigProperties();
     } catch (exception, stackTrace) {
       // Ensure that fetch status is updated.
-      await _updateConfigProperties();
+      // await _updateConfigProperties();
       convertPlatformException(exception, stackTrace);
     }
   }
@@ -147,23 +185,33 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   @override
   Future<bool> fetchAndActivate() async {
     try {
-      bool? configChanged = await channel.invokeMethod<bool>(
-          'RemoteConfig#fetchAndActivate', <String, dynamic>{
-        'appName': app.name,
-      });
+      log('method_remote_config fetchAndActivate');
+      bool configChanged = await _api.fetchAndActivate(pigeonDefault);
       await _updateConfigParameters();
-      await _updateConfigProperties();
-      return configChanged!;
+      //await _updateConfigProperties();
+      return configChanged;
     } catch (exception, stackTrace) {
       // Ensure that fetch status is updated.
-      await _updateConfigProperties();
+      // await _updateConfigProperties();
       convertPlatformException(exception, stackTrace);
     }
   }
 
   @override
-  Map<String, RemoteConfigValue> getAll() {
+  Map<String, PigeonRemoteConfigValue> getAll() {
     return _activeParameters;
+  }
+
+  @override
+  Map<String, RemoteConfigValue> getAllConverted() {
+    var parameters = <String, RemoteConfigValue>{};
+    for (final key in _activeParameters.keys) {
+      final rawValue = _activeParameters[key]!.value;
+
+      parameters[key] = RemoteConfigValue(_pigoenListIntToListInt(rawValue!),
+          _pigeonToValueSource(_activeParameters[key]!.source));
+    }
+    return parameters;
   }
 
   @override
@@ -171,7 +219,7 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     if (!_activeParameters.containsKey(key)) {
       return RemoteConfigValue.defaultValueForBool;
     }
-    return _activeParameters[key]!.asBool();
+    return _pigeonValueToBool(_activeParameters[key]!);
   }
 
   @override
@@ -179,7 +227,7 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     if (!_activeParameters.containsKey(key)) {
       return RemoteConfigValue.defaultValueForInt;
     }
-    return _activeParameters[key]!.asInt();
+    return _pigeonValueToInt(_activeParameters[key]!);
   }
 
   @override
@@ -187,7 +235,7 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     if (!_activeParameters.containsKey(key)) {
       return RemoteConfigValue.defaultValueForDouble;
     }
-    return _activeParameters[key]!.asDouble();
+    return _pigeonValueToDouble(_activeParameters[key]!);
   }
 
   @override
@@ -195,30 +243,42 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     if (!_activeParameters.containsKey(key)) {
       return RemoteConfigValue.defaultValueForString;
     }
-    return _activeParameters[key]!.asString();
+    return _pigeonValueToString(_activeParameters[key]!);
   }
 
   @override
-  RemoteConfigValue getValue(String key) {
+  PigeonRemoteConfigValue getValue(String key) {
     if (!_activeParameters.containsKey(key)) {
-      return RemoteConfigValue(null, ValueSource.valueStatic);
+      return PigeonRemoteConfigValue(source: PigeonValueSource.valueStatic);
     }
     return _activeParameters[key]!;
   }
 
   @override
+  RemoteConfigValue getValueConverted(String key) {
+    var pigeonValue = getValue(key);
+    return RemoteConfigValue(_pigoenListIntToListInt(pigeonValue.value!),
+        _pigeonToValueSource(pigeonValue.source));
+  }
+
+  @override
+  Future<void> setConfigSettingsConverted(
+      RemoteConfigSettings remoteConfigSettings) {
+    log('method remote config setConfigSettingsConverted');
+    var pigeonSettings = PigeonRemoteConfigSettings(
+        fetchTimeout: remoteConfigSettings.fetchTimeout.inSeconds,
+        minimumFetchInterval:
+            remoteConfigSettings.minimumFetchInterval.inSeconds);
+    return setConfigSettings(pigeonSettings);
+  }
+
+  @override
   Future<void> setConfigSettings(
-    RemoteConfigSettings remoteConfigSettings,
+    PigeonRemoteConfigSettings pigeonRemoteConfigSettings,
   ) async {
     try {
-      await channel
-          .invokeMethod('RemoteConfig#setConfigSettings', <String, dynamic>{
-        'appName': app.name,
-        'fetchTimeout': remoteConfigSettings.fetchTimeout.inSeconds,
-        'minimumFetchInterval':
-            remoteConfigSettings.minimumFetchInterval.inSeconds,
-      });
-      await _updateConfigProperties();
+      await _api.setConfigSettings(pigeonDefault, pigeonRemoteConfigSettings);
+      //await _updateConfigProperties();
     } catch (exception, stackTrace) {
       convertPlatformException(exception, stackTrace);
     }
@@ -227,10 +287,7 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   @override
   Future<void> setDefaults(Map<String, dynamic> defaultParameters) async {
     try {
-      await channel.invokeMethod('RemoteConfig#setDefaults', <String, dynamic>{
-        'appName': app.name,
-        'defaults': defaultParameters
-      });
+      await _api.setDefaults(pigeonDefault, defaultParameters);
       await _updateConfigParameters();
     } catch (exception, stackTrace) {
       convertPlatformException(exception, stackTrace);
@@ -238,12 +295,8 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
   }
 
   Future<void> _updateConfigParameters() async {
-    Map<dynamic, dynamic>? parameters = await channel
-        .invokeMapMethod<dynamic, dynamic>(
-            'RemoteConfig#getAll', <String, dynamic>{
-      'appName': app.name,
-    });
-    _activeParameters = _parseParameters(parameters!);
+    Map<dynamic, dynamic>? parameters = await _api.getAll(pigeonDefault);
+    _activeParameters = _parsePigeonParameters(parameters!);
   }
 
   Future<void> _updateConfigProperties() async {
@@ -258,9 +311,9 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
     final lastFetchMillis = properties['lastFetchTime'];
     final lastFetchStatus = properties['lastFetchStatus'];
 
-    _settings = RemoteConfigSettings(
-      fetchTimeout: fetchTimeout,
-      minimumFetchInterval: minimumFetchInterval,
+    _settings = PigeonRemoteConfigSettings(
+      fetchTimeout: fetchTimeout.inSeconds,
+      minimumFetchInterval: minimumFetchInterval.inSeconds,
     );
     _lastFetchTime = DateTime.fromMillisecondsSinceEpoch(lastFetchMillis);
     _lastFetchStatus = _parseFetchStatus(lastFetchStatus);
@@ -273,6 +326,18 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
       final rawValue = rawParameters[key];
       parameters[key] = RemoteConfigValue(
           rawValue['value'], _parseValueSource(rawValue['source']));
+    }
+    return parameters;
+  }
+
+  Map<String, PigeonRemoteConfigValue> _parsePigeonParameters(
+      Map<dynamic, dynamic> rawParameters) {
+    var parameters = <String, PigeonRemoteConfigValue>{};
+    for (final key in rawParameters.keys) {
+      final rawValue = rawParameters[key];
+      parameters[key] = PigeonRemoteConfigValue(
+          value: rawValue['value'],
+          source: _valueSourceToPigeon(_parseValueSource(rawValue['source'])));
     }
     return parameters;
   }
@@ -301,5 +366,86 @@ class MethodChannelFirebaseRemoteConfig extends FirebaseRemoteConfigPlatform {
       final updatedKeys = Set<String>.from(event);
       return RemoteConfigUpdate(updatedKeys);
     });
+  }
+
+  PigeonValueSource _valueSourceToPigeon(ValueSource source) {
+    switch (source) {
+      case ValueSource.valueDefault:
+        return PigeonValueSource.valueDefault;
+      case ValueSource.valueRemote:
+        return PigeonValueSource.valueRemote;
+      case ValueSource.valueStatic:
+      default:
+        return PigeonValueSource.valueStatic;
+    }
+  }
+
+  ValueSource _pigeonToValueSource(PigeonValueSource source) {
+    switch (source) {
+      case PigeonValueSource.valueDefault:
+        return ValueSource.valueDefault;
+      case PigeonValueSource.valueRemote:
+        return ValueSource.valueRemote;
+      case PigeonValueSource.valueStatic:
+      default:
+        return ValueSource.valueStatic;
+    }
+  }
+
+  static int _pigeonValueToInt(PigeonRemoteConfigValue pigeonValue) {
+    final value = pigeonValue.value;
+    if (value != null) {
+      final String strValue =
+          const Utf8Codec().decode(_pigoenListIntToListInt(value));
+      final int intValue =
+          int.tryParse(strValue) ?? RemoteConfigValue.defaultValueForInt;
+      return intValue;
+    } else {
+      return RemoteConfigValue.defaultValueForInt;
+    }
+  }
+
+  static String _pigeonValueToString(PigeonRemoteConfigValue pigeonValue) {
+    final value = pigeonValue.value;
+    return value != null
+        ? const Utf8Codec().decode(_pigoenListIntToListInt(value))
+        : RemoteConfigValue.defaultValueForString;
+  }
+
+  /// Decode value to double.
+  static double _pigeonValueToDouble(PigeonRemoteConfigValue pigeonValue) {
+    final value = pigeonValue.value;
+    if (value != null) {
+      final String strValue =
+          const Utf8Codec().decode(_pigoenListIntToListInt(value));
+      final double doubleValue =
+          double.tryParse(strValue) ?? RemoteConfigValue.defaultValueForDouble;
+      return doubleValue;
+    } else {
+      return RemoteConfigValue.defaultValueForDouble;
+    }
+  }
+
+  /// Decode value to bool.
+  static bool _pigeonValueToBool(PigeonRemoteConfigValue pigeonValue) {
+    final value = pigeonValue.value;
+    if (value != null) {
+      final String strValue =
+          const Utf8Codec().decode(_pigoenListIntToListInt(value));
+      final lowerCase = strValue.toLowerCase();
+      return lowerCase == 'true' || lowerCase == '1';
+    } else {
+      return RemoteConfigValue.defaultValueForBool;
+    }
+  }
+
+  static List<int> _pigoenListIntToListInt(List<int?> list) {
+    List<int> newList = [];
+    for (final int? element in list) {
+      if (element != null) {
+        newList.add(element);
+      }
+    }
+    return newList;
   }
 }

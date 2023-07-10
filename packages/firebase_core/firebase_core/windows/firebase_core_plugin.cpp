@@ -1,13 +1,15 @@
 // Copyright 2023, the Chromium project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+#define _CRT_SECURE_NO_WARNINGS
 #include "firebase_core_plugin.h"
 
 // This must be included before many other Windows headers.
 #include <windows.h>
 
 #include "firebase/app.h"
+#include "firebase/log.h"
+#include "firebase/remote_config.h"
 #include "messages.g.h"
 
 // For getPlatformVersion; remove unless needed for your plugin implementation.
@@ -18,12 +20,14 @@
 
 #include <future>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 using ::firebase::App;
+using ::firebase::remote_config::RemoteConfig;
 
 namespace firebase_core_windows {
 
@@ -38,7 +42,10 @@ void FirebaseCorePlugin::RegisterWithRegistrar(
   registrar->AddPlugin(std::move(plugin));
 }
 
-FirebaseCorePlugin::FirebaseCorePlugin() {}
+FirebaseCorePlugin::FirebaseCorePlugin() {
+  firebase::SetLogLevel(firebase::kLogLevelVerbose);
+  std::cout << "[C++] FirebaseCorePlugin::FirebaseCorePlugin" << std::endl;
+}
 
 FirebaseCorePlugin::~FirebaseCorePlugin() = default;
 
@@ -87,7 +94,19 @@ PigeonInitializeResponse AppToPigeonInitializeResponse(const App &app) {
   PigeonInitializeResponse response = PigeonInitializeResponse();
   response.set_name(app.name());
   response.set_options(optionsFromFIROptions(app.options()));
+
+  // response.set_plugin_constants(registrar.);
   return response;
+}
+
+void *FirebaseCorePlugin::GetFirebaseApp(std::string appName) {
+  return App::GetInstance(appName.c_str());
+}
+
+void *FirebaseCorePlugin::GetFirebaseRemoteConfig(std::string appName) {
+  App *app = App::GetInstance(appName.c_str());
+  RemoteConfig *rc = RemoteConfig::GetInstance(app);
+  return rc;
 }
 
 void FirebaseCorePlugin::InitializeApp(
@@ -95,9 +114,9 @@ void FirebaseCorePlugin::InitializeApp(
     const PigeonFirebaseOptions &initialize_app_request,
     std::function<void(ErrorOr<PigeonInitializeResponse> reply)> result) {
   // Create an app
-  App *app;
-  app = App::Create(PigeonFirebaseOptionsToAppOptions(initialize_app_request),
-                    app_name.c_str());
+  App *app =
+      App::Create(PigeonFirebaseOptionsToAppOptions(initialize_app_request),
+                  app_name.c_str());
 
   // Send back the result to Flutter
   result(AppToPigeonInitializeResponse(*app));
@@ -105,16 +124,20 @@ void FirebaseCorePlugin::InitializeApp(
 
 void FirebaseCorePlugin::InitializeCore(
     std::function<void(ErrorOr<flutter::EncodableList> reply)> result) {
-  // TODO: Missing function to get the list of currently initialized apps
   std::vector<PigeonInitializeResponse> initializedApps;
+
+  std::vector<App *> all_apps = App::GetApps();
+  for (const App *app : all_apps) {
+    initializedApps.push_back(AppToPigeonInitializeResponse(*app));
+  }
 
   flutter::EncodableList encodableList;
 
   // Insert the contents of the vector into the EncodableList
-  // for (const auto &item : initializedApps) {
-  //  encodableList.push_back(flutter::EncodableValue(item));
-  //}
-  result(flutter::EncodableList());
+  for (const auto &item : initializedApps) {
+    encodableList.push_back(flutter::CustomEncodableValue(item));
+  }
+  result(encodableList);
 }
 
 void FirebaseCorePlugin::OptionsFromResource(
