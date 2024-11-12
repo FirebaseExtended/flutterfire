@@ -226,6 +226,15 @@ abstract class Query<T extends Object?> {
     AggregateField? aggregateField29,
     AggregateField? aggregateField30,
   ]);
+
+  VectorQuery findNearest(
+    String field, {
+    /// List<double> or VectorValue
+    required Object queryVector,
+    required int limit,
+    required DistanceMeasure distanceMeasure,
+    required VectorQueryOptions options,
+  });
 }
 
 /// Represents a [Query] over the data at a particular location.
@@ -900,6 +909,28 @@ class _JsonQuery implements Query<Map<String, dynamic>> {
       this,
     );
   }
+
+  @override
+  VectorQuery findNearest(
+    String field, {
+    /// List<double> or VectorValue
+    required Object queryVector,
+    required int limit,
+    required DistanceMeasure distanceMeasure,
+    required VectorQueryOptions options,
+  }) {
+    return VectorQuery._(
+      firestore,
+      _delegate.findNearest(
+        field,
+        queryVector: queryVector,
+        limit: limit,
+        distanceMeasure: distanceMeasure,
+        options: options,
+      ),
+      this,
+    );
+  }
 }
 
 class _WithConverterQuery<T extends Object?> implements Query<T> {
@@ -1142,6 +1173,24 @@ class _WithConverterQuery<T extends Object?> implements Query<T> {
       aggregateField28,
       aggregateField29,
       aggregateField30,
+    );
+  }
+
+  @override
+  VectorQuery findNearest(
+    String field, {
+    /// List<double> or VectorValue
+    required Object queryVector,
+    required int limit,
+    required DistanceMeasure distanceMeasure,
+    required VectorQueryOptions options,
+  }) {
+    return _originalQuery.findNearest(
+      field,
+      queryVector: queryVector,
+      limit: limit,
+      distanceMeasure: distanceMeasure,
+      options: options,
     );
   }
 }
